@@ -1,0 +1,19 @@
+[versions]
+agp = "9.3.2"
+kotlin = "2.4.10"
+compose = "1.11.1"
+backdrop = "2.0.0"
+shapes = "1.2.0"
+activity = "1.13.0"
+core = "1.19.0"
+
+[libraries]
+backdrop = { module = "io.github.kyant0:backdrop", version.ref = "backdrop" }
+shapes = { module = "io.github.kyant0:shapes", version.ref = "shapes" }
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activity" }
+androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "core" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+jetbrains-compose = { id = "org.jetbrains.compose", version.ref = "compose" }

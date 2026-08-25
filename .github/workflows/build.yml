@@ -1,0 +1,38 @@
+name: Build Liytu APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 37 + build-tools
+        run: |
+          sdkmanager --install "platforms;android-37" "build-tools;37.0.0" "platform-tools" | tail -5
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      - name: Build debug APK
+        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Liytu-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
