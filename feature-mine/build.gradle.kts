@@ -26,6 +26,7 @@ dependencies {
     implementation(project(":core-ui"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.material3)
+    implementation(libs.material.icons.extended)
     implementation(libs.lifecycle.viewmodel.compose)
     implementation("org.jetbrains.compose.foundation:foundation:1.11.1")
     implementation("org.jetbrains.compose.ui:ui:1.11.1")
