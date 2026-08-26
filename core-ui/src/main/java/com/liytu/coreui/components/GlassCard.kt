@@ -12,6 +12,7 @@ import androidx.compose.ui.unit.dp
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
+import com.liytu.coreui.theme.LocalAppBackdrop
 
 /**
  * 液态玻璃卡片：基于 backdrop 的模糊玻璃质感。
@@ -19,7 +20,7 @@ import com.kyant.backdrop.effects.blur
  */
 @Composable
 fun GlassCard(
-    backdrop: Backdrop?,
+    backdrop: Backdrop? = LocalAppBackdrop.current,
     modifier: Modifier = Modifier,
     cornerRadius: Dp = 24.dp,
     blurRadius: Dp = 32.dp,
