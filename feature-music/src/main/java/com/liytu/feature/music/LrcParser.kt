@@ -183,3 +183,22 @@ private fun decodeText(bytes: ByteArray): String {
         }
     }
 }
+
+/**
+ * 智能歌词加载（优先级）：
+ * 1. TrackItem.lyricUri（SAF 文件夹导入时匹配到的同名 .lrc）
+ * 2. 音频内嵌 ID3 USLT 歌词标签
+ * 3. 同目录同名 .lrc 文件（MediaStore DATA 路径）
+ */
+fun loadLrcSmart(context: Context, track: TrackItem): List<LrcLine> {
+    track.lyricUri?.let { lrcUri ->
+        return try {
+            val bytes = context.contentResolver.openInputStream(lrcUri)?.use { it.readBytes() }
+                ?: return emptyList()
+            parseLrc(decodeText(bytes))
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+    return loadLrcFromTrack(context, track)
+}
