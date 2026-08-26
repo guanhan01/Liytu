@@ -33,7 +33,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.Slider
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import android.app.Activity
+import android.media.AudioManager
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.CircularProgressIndicator
@@ -127,9 +134,15 @@ fun VideoScreen(modifier: Modifier = Modifier) {
 
     val current = playing
     if (current != null) {
+        val group = remember(allVideos, current.uri) {
+            allVideos.filter { (it.folder ?: "") == (current.folder ?: "") }
+                .sortedBy { it.title }
+        }
         VideoPlayerPage(
             item = current,
+            group = group,
             onBack = { playing = null },
+            onSwitchTo = { playing = it },
         )
     } else {
         Column(
@@ -302,13 +315,44 @@ private fun VideoCard(video: VideoItem, index: Int, onClick: () -> Unit) {
 }
 
 @Composable
-private fun VideoPlayerPage(item: VideoItem, onBack: () -> Unit) {
+private fun VideoPlayerPage(
+    item: VideoItem,
+    group: List<VideoItem>,
+    onBack: () -> Unit,
+    onSwitchTo: (VideoItem) -> Unit,
+) {
     val context = LocalContext.current
     val player = remember(item.uri) {
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(item.uri))
             prepare()
             playWhenReady = true
+        }
+    }
+
+    // ---- 手势 & 控制状态 ----
+    var controlsVisible by remember { mutableStateOf(true) }
+    var hud by remember { mutableStateOf<String?>(null) }
+    var progress by remember { mutableFloatStateOf(0f) }
+    var draggingProgress by remember { mutableStateOf<Float?>(null) }
+    var dragMode by remember { mutableIntStateOf(0) }
+    var startBright by remember { mutableFloatStateOf(-1f) }
+    var startVol by remember { mutableIntStateOf(-1) }
+    var seekPreview by remember { mutableLongStateOf(0L) }
+    var speed by remember { mutableFloatStateOf(1f) }
+    LaunchedEffect(speed) {
+        player.playbackParameters = PlaybackParameters(speed)
+    }
+    val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager }
+    val maxVol = remember { audioManager?.getStreamMaxVolume(AudioManager.STREAM_MUSIC) ?: 15 }
+
+    LaunchedEffect(player) {
+        while (true) {
+            val dur = player.duration.takeIf { it > 0 } ?: 0L
+            if (dur > 0 && draggingProgress == null) {
+                progress = (player.currentPosition.toFloat() / dur).coerceIn(0f, 1f)
+            }
+            delay(400)
         }
     }
 
@@ -319,16 +363,103 @@ private fun VideoPlayerPage(item: VideoItem, onBack: () -> Unit) {
             factory = { ctx ->
                 PlayerView(ctx).apply {
                     this.player = player
-                    useController = true
-                    setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+                    useController = false
                 }
             },
             modifier = Modifier.fillMaxSize(),
         )
-        // 顶部返回浮层
+        // 手势层：单击控制显隐 / 双击播放暂停 / 横滑进度 / 左半竖滑亮度 右半竖滑音量
+        Box(
+            Modifier
+                .fillMaxSize()
+                .pointerInput(player) {
+                    detectTapGestures(
+                        onTap = { controlsVisible = !controlsVisible },
+                        onDoubleTap = {
+                            if (player.isPlaying) player.pause() else player.play()
+                        },
+                    )
+                }
+                .pointerInput(player) {
+                    detectDragGestures(
+                        onDragStart = { offset ->
+                            dragMode = 0
+                            if (offset.x < size.width / 2f) {
+                                val act = context as? Activity
+                                startBright = act?.window?.attributes?.screenBrightness?.takeIf { it >= 0f } ?: 0.5f
+                                startVol = -1
+                            } else {
+                                startVol = audioManager?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: 0
+                                startBright = -1f
+                            }
+                        },
+                        onDrag = { change, amount ->
+                            change.consume()
+                            if (dragMode == 0) {
+                                dragMode = if (kotlin.math.abs(amount.x) > kotlin.math.abs(amount.y)) 1 else 2
+                            }
+                            when (dragMode) {
+                                1 -> {
+                                    val dur = player.duration.takeIf { it > 0 } ?: 0L
+                                    if (dur > 0) {
+                                        val deltaMs = (-amount.x / size.width * dur).toLong()
+                                        seekPreview = (player.currentPosition + deltaMs).coerceIn(0L, dur)
+                                        hud = videoDeltaText(seekPreview - player.currentPosition)
+                                    }
+                                }
+                                else -> {
+                                    if (startBright >= 0f) {
+                                        val act = context as? Activity
+                                        if (act != null) {
+                                            val b = (startBright - amount.y / size.height * 1.2f).coerceIn(0.05f, 1f)
+                                            act.window.attributes = act.window.attributes.apply { screenBrightness = b }
+                                            hud = "亮度 ${(b * 100).toInt()}%"
+                                        }
+                                    } else if (startVol >= 0) {
+                                        val dv = (-amount.y / (size.height / 2f) * maxVol).toInt()
+                                        val v = (startVol + dv).coerceIn(0, maxVol)
+                                        audioManager?.setStreamVolume(AudioManager.STREAM_MUSIC, v, 0)
+                                        hud = "音量 ${(v * 100 / maxVol)}%"
+                                    }
+                                }
+                            }
+                        },
+                        onDragEnd = {
+                            if (dragMode == 1 && seekPreview > 0) player.seekTo(seekPreview)
+                            dragMode = 0
+                            startBright = -1f
+                            startVol = -1
+                            hud = null
+                        },
+                        onDragCancel = {
+                            dragMode = 0
+                            startBright = -1f
+                            startVol = -1
+                            hud = null
+                        },
+                    )
+                },
+        )
+        // HUD 提示
+        hud?.let { msg ->
+            Box(
+                Modifier
+                    .align(Alignment.Center)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color.Black.copy(alpha = 0.6f))
+                    .padding(horizontal = 18.dp, vertical = 10.dp)
+            ) {
+                Text(msg, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            }
+        }
+        // ---- 顶部控制（随 controlsVisible 显隐） ----
+        androidx.compose.animation.AnimatedVisibility(
+            visible = controlsVisible,
+            modifier = Modifier.align(Alignment.TopStart),
+        ) {
+        Column {
         Row(
             Modifier
-                .align(Alignment.TopStart)
                 .background(
                     Brush.verticalGradient(
                         listOf(Color.Black.copy(alpha = 0.55f), Color.Transparent)
@@ -358,12 +489,145 @@ private fun VideoPlayerPage(item: VideoItem, onBack: () -> Unit) {
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
+            // 倍速
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color.Black.copy(alpha = 0.35f))
+                    .clickable {
+                        val speeds = listOf(0.75f, 1f, 1.25f, 1.5f, 2f)
+                        speed = speeds[(speeds.indexOf(speed) + 1) % speeds.size]
+                    }
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Text(
+                    if (speed == 1f) "1.0x" else "${speed}x",
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+        }
+        // 选集行
+        val idx = group.indexOfFirst { it.uri == item.uri }
+        val prev = if (idx > 0) group.getOrNull(idx - 1) else null
+        val next = group.getOrNull(idx + 1)
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 4.dp)
+                .padding(top = 52.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(
+                Modifier
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(if (prev != null) Color.Black.copy(alpha = 0.35f) else Color.Transparent)
+                    .clickable(enabled = prev != null) { prev?.let(onSwitchTo) }
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Filled.ArrowBack,
+                    contentDescription = "上一集",
+                    tint = if (prev != null) Color.White else Color.White.copy(alpha = 0.3f),
+                    modifier = Modifier.size(14.dp),
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    "上一集",
+                    color = if (prev != null) Color.White else Color.White.copy(alpha = 0.3f),
+                    fontSize = 12.sp,
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            Text(
+                "${idx + 1} / ${group.size}",
+                color = Color.White.copy(alpha = 0.7f),
+                fontSize = 11.sp,
+            )
+            Spacer(Modifier.weight(1f))
+            Row(
+                Modifier
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(if (next != null) Color.Black.copy(alpha = 0.35f) else Color.Transparent)
+                    .clickable(enabled = next != null) { next?.let(onSwitchTo) }
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "下一集",
+                    color = if (next != null) Color.White else Color.White.copy(alpha = 0.3f),
+                    fontSize = 12.sp,
+                )
+                Spacer(Modifier.width(4.dp))
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowForward,
+                    contentDescription = "下一集",
+                    tint = if (next != null) Color.White else Color.White.copy(alpha = 0.3f),
+                    modifier = Modifier.size(14.dp),
+                )
+            }
+        }
+        }
+        }
+        // ---- 底部控制条（随 controlsVisible 显隐） ----
+        androidx.compose.animation.AnimatedVisibility(
+            visible = controlsVisible,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.8f))
+                        )
+                    )
+                    .padding(horizontal = 14.dp, vertical = 10.dp)
+            ) {
+                Slider(
+                    value = draggingProgress ?: progress,
+                    onValueChange = { draggingProgress = it },
+                    onValueChangeFinished = {
+                        val dur = player.duration.takeIf { it > 0 } ?: 0L
+                        if (dur > 0) {
+                            player.seekTo(((draggingProgress ?: 0f) * dur).toLong())
+                        }
+                        draggingProgress = null
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { if (player.isPlaying) player.pause() else player.play() }) {
+                        Icon(
+                            if (player.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                            contentDescription = "播放/暂停",
+                            tint = Color.White,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+                    Spacer(Modifier.width(6.dp))
+                    val dur = player.duration.takeIf { it > 0 } ?: 0L
+                    val shown = if (draggingProgress != null) (draggingProgress!! * dur).toLong() else player.currentPosition
+                    Text(
+                        "${formatDuration(shown)} / ${formatDuration(dur)}",
+                        color = Color.White.copy(alpha = 0.85f),
+                        fontSize = 12.sp,
+                    )
+                }
+            }
         }
     }
 
     DisposableEffect(player) {
         onDispose { player.release() }
     }
+}
+
+private fun videoDeltaText(ms: Long): String {
+    val s = ms / 1000
+    return if (s >= 0) "+${s / 60}:%02d".format(s % 60) else "-${(-s) / 60}:%02d".format((-s) % 60)
 }
 
 private fun videoBrush(index: Int): Brush {
