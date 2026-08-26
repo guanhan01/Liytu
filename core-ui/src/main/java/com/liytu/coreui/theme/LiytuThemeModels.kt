@@ -10,7 +10,7 @@ enum class ColorMode { LIGHT, DARK, SYSTEM }
 
 /**
  * Liytu 主题预设（DIY 主题系统的核心数据模型）
- * 支持保存多个预设、编辑 keyColor/accentColor/圆角/液态玻璃强度等。
+ * isSolid=true 表示纯色主题（背景为单一颜色，无渐变）
  */
 data class LiytuThemePreset(
     val id: String,
@@ -22,16 +22,14 @@ data class LiytuThemePreset(
     val globalCornerRadius: Float = 20f,      // dp
     val liquidGlassEnabled: Boolean = true,
     val liquidGlassIntensity: Float = 1f,     // 0..1
-    val blurRadius: Float = 32f,              // dp
-    val fontFamilyName: String = "system",
-    val fontSizeScale: Float = 1f,
+    val isSolid: Boolean = false,             // 纯色主题
     val isDefault: Boolean = false,
 ) {
     val key: Color get() = Color(keyColor)
     val accent: Color get() = Color(accentColor)
 }
 
-/** 内置预设 */
+/** 内置渐变预设 */
 object LiytuPresets {
     val defaults = listOf(
         LiytuThemePreset(
@@ -66,5 +64,18 @@ object LiytuPresets {
             keyColor = 0xFFFF7EB3,
             accentColor = 0xFFB388FF,
         ),
+    )
+
+    /** 纯色主题（keyColor == accentColor == 单一背景色） */
+    val solids = listOf(
+        LiytuThemePreset(id = "solid_black", name = "夜黑", keyColor = 0xFF14151A, accentColor = 0xFF14151A, isSolid = true, liquidGlassEnabled = false),
+        LiytuThemePreset(id = "solid_white", name = "云白", keyColor = 0xFFF3F4F8, accentColor = 0xFFF3F4F8, isSolid = true, liquidGlassEnabled = false),
+        LiytuThemePreset(id = "solid_graphite", name = "石墨", keyColor = 0xFF3A3F4B, accentColor = 0xFF3A3F4B, isSolid = true, liquidGlassEnabled = false),
+        LiytuThemePreset(id = "solid_crimson", name = "绯红", keyColor = 0xFFE5484D, accentColor = 0xFFE5484D, isSolid = true, liquidGlassEnabled = false),
+        LiytuThemePreset(id = "solid_orange", name = "橙阳", keyColor = 0xFFFF7A45, accentColor = 0xFFFF7A45, isSolid = true, liquidGlassEnabled = false),
+        LiytuThemePreset(id = "solid_yellow", name = "明黄", keyColor = 0xFFF5B70D, accentColor = 0xFFF5B70D, isSolid = true, liquidGlassEnabled = false),
+        LiytuThemePreset(id = "solid_emerald", name = "翡翠", keyColor = 0xFF30A46C, accentColor = 0xFF30A46C, isSolid = true, liquidGlassEnabled = false),
+        LiytuThemePreset(id = "solid_azure", name = "青蓝", keyColor = 0xFF0091FF, accentColor = 0xFF0091FF, isSolid = true, liquidGlassEnabled = false),
+        LiytuThemePreset(id = "solid_violet", name = "罗兰", keyColor = 0xFF8E4EC6, accentColor = 0xFF8E4EC6, isSolid = true, liquidGlassEnabled = false),
     )
 }
