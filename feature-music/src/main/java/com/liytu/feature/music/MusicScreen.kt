@@ -74,6 +74,13 @@ import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import com.liytu.coremedia.PlayerManager
+import android.content.res.Configuration
+import android.database.Cursor
+import android.provider.DocumentsContract
+import androidx.compose.foundation.lazy.items
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalConfiguration
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -84,6 +91,7 @@ data class TrackItem(
     val title: String,
     val artist: String,
     val durationMs: Long,
+    val lyricUri: Uri? = null,
 )
 
 @Composable
@@ -177,12 +185,33 @@ fun MusicScreen(modifier: Modifier = Modifier) {
         }
     }
 
+    // SAF 文件夹导入（递归扫描音频 + 同名 .lrc）
+    val scope = rememberCoroutineScope()
+    val folderLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { treeUri ->
+        if (treeUri != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    treeUri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (_: Exception) {
+            }
+            scope.launch {
+                loading = true
+                val found = withContext(Dispatchers.IO) { scanAudioInTree(context, treeUri) }
+                imported = (imported + found).distinctBy { it.uri.toString() }
+                loading = false
+            }
+        }
+    }
+
     val allTracks = remember(tracks, imported) { tracks + imported }
     val currentTrack = allTracks.getOrNull(currentIndex)
 
-    // 歌词：同目录同名 .lrc
+    // 歌词：SAF 歌词 URI -> 内嵌 USLT -> 同目录同名 .lrc
     val lyrics = remember(currentTrack) {
-        currentTrack?.let { loadLrcFromTrack(context, it) } ?: emptyList()
+        currentTrack?.let { loadLrcSmart(context, it) } ?: emptyList()
     }
 
     // 播放
@@ -225,6 +254,7 @@ fun MusicScreen(modifier: Modifier = Modifier) {
             onRequestPermission = { permissionLauncher.launch(audioPermission()) },
             onRefresh = { refreshTick++ },
             onImport = { importLauncher.launch(arrayOf("audio/*")) },
+            onImportFolder = { folderLauncher.launch(null) },
             onTrackClick = { playAt(it) },
             onOpenPlayer = { if (currentTrack != null) showPlayer = true },
             isMiniVisible = currentTrack != null,
@@ -249,6 +279,7 @@ private fun MusicListScreen(
     onRequestPermission: () -> Unit,
     onRefresh: () -> Unit,
     onImport: () -> Unit,
+    onImportFolder: () -> Unit,
     onTrackClick: (Int) -> Unit,
     onOpenPlayer: () -> Unit,
     isMiniVisible: Boolean,
@@ -284,7 +315,7 @@ private fun MusicListScreen(
             IconButton(onClick = onRefresh) {
                 Icon(Icons.Filled.Refresh, contentDescription = "刷新", tint = Color.White.copy(alpha = 0.85f))
             }
-            // 导入
+            // 导入文件 + 导入文件夹
             Row(
                 Modifier
                     .clip(RoundedCornerShape(18.dp))
@@ -296,6 +327,19 @@ private fun MusicListScreen(
                 Icon(Icons.Filled.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(4.dp))
                 Text("导入", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            }
+            Spacer(Modifier.width(8.dp))
+            Row(
+                Modifier
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(Color.White.copy(alpha = 0.18f))
+                    .clickable(onClick = onImportFolder)
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                FolderIcon(color = Color.White, size = 15.dp)
+                Spacer(Modifier.width(4.dp))
+                Text("文件夹", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
             }
         }
         Spacer(Modifier.height(6.dp))
@@ -346,6 +390,18 @@ private fun MusicListScreen(
                         Icon(Icons.Filled.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
                         Text("导入音乐文件", color = Color.White, fontWeight = FontWeight.Medium)
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Row(
+                        Modifier
+                            .clip(RoundedCornerShape(24.dp))
+                            .background(Color.White.copy(alpha = 0.22f))
+                            .clickable(onClick = onImportFolder)
+                            .padding(horizontal = 24.dp, vertical = 12.dp)
+                    ) {
+                        FolderIcon(color = Color.White, size = 16.dp)
+                        Spacer(Modifier.width(6.dp))
+                        Text("导入文件夹（含子目录）", color = Color.White, fontWeight = FontWeight.Medium)
                     }
                 }
             }
@@ -511,9 +567,11 @@ private fun PlayerScreen(
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val playerPosition = remember { mutableLongStateOf(positionMs) }
     var dragging by remember { mutableStateOf(false) }
     var sliderPos by remember { mutableFloatStateOf(positionMs.toFloat()) }
+    var lyricsView by remember { mutableStateOf(false) }
     val totalMs = remember(durationMs) { if (durationMs > 0) durationMs else 0L }
 
     // 位置轮询
@@ -528,10 +586,179 @@ private fun PlayerScreen(
         }
     }
 
-    BackHandler { onBack() }
+    BackHandler { if (lyricsView) lyricsView = false else onBack() }
 
+    if (isLandscape) {
+        // 横屏双列歌词：左封面 + 右歌词
+        PlayerLandscape(
+            track = track,
+            lyrics = lyrics,
+            isPlaying = isPlaying,
+            positionMs = playerPosition.longValue,
+            durationMs = totalMs,
+            onBack = onBack,
+            onTogglePlay = onTogglePlay,
+            onPrevious = onPrevious,
+            onNext = onNext,
+            onSeek = onSeek,
+            dragging = dragging,
+            sliderPos = sliderPos,
+            onSliderChange = { sliderPos = it; dragging = true },
+            onSliderFinish = { onSeek(sliderPos.toLong()); dragging = false },
+            openLyrics = { lyricsView = true },
+            modifier = modifier,
+        )
+    } else if (lyricsView) {
+        // 独立全屏歌词界面
+        LyricsFullScreen(
+            track = track,
+            lyrics = lyrics,
+            isPlaying = isPlaying,
+            positionMs = playerPosition.longValue,
+            durationMs = totalMs,
+            onBack = { lyricsView = false },
+            onTogglePlay = onTogglePlay,
+            onPrevious = onPrevious,
+            onNext = onNext,
+            onSeek = onSeek,
+            dragging = dragging,
+            sliderPos = sliderPos,
+            onSliderChange = { sliderPos = it; dragging = true },
+            onSliderFinish = { onSeek(sliderPos.toLong()); dragging = false },
+        )
+    } else {
+        // 竖屏封面视图（含歌词摘要 + 歌词入口）
+        Column(
+            modifier
+                .fillMaxSize()
+                .padding(horizontal = 28.dp, vertical = 14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            // 顶栏
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.Filled.ArrowBack, contentDescription = "返回", tint = Color.White)
+                }
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "正在播放",
+                    color = Color.White.copy(alpha = 0.85f),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+                Spacer(Modifier.weight(1f))
+                // 歌词入口按钮
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color.White.copy(alpha = 0.16f))
+                        .clickable { lyricsView = true }
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    LyricsIcon(color = Color.White, size = 14.dp)
+                    Spacer(Modifier.width(4.dp))
+                    Text("歌词", color = Color.White.copy(alpha = 0.9f), fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+            Spacer(Modifier.weight(1f))
+
+            // 旋转封面
+            val infinite = rememberInfiniteTransition(label = "cover")
+            val angle by infinite.animateFloat(
+                initialValue = 0f,
+                targetValue = 360f,
+                animationSpec = infiniteRepeatable(tween(20000, easing = LinearEasing)),
+                label = "angle",
+            )
+            Box(
+                Modifier
+                    .size(230.dp)
+                    .graphicsLayer { rotationZ = angle }
+                    .clip(CircleShape)
+                    .background(trackBrush(track.title, true)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    track.title.firstOrNull()?.uppercase() ?: "♪",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 84.sp,
+                )
+            }
+            Spacer(Modifier.height(22.dp))
+
+            // 歌词摘要（有歌词时显示，点击也可进全屏）
+            if (lyrics.isNotEmpty()) {
+                LyricsPanel(
+                    lyrics = lyrics,
+                    positionMs = playerPosition.longValue,
+                    onSeek = onSeek,
+                    onOpenFull = { lyricsView = true },
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+
+            // 曲目信息
+            Text(
+                track.title,
+                color = Color.White,
+                fontSize = 21.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                track.artist,
+                color = Color.White.copy(alpha = 0.65f),
+                fontSize = 14.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(26.dp))
+
+            PlayerControls(
+                isPlaying = isPlaying,
+                positionMs = playerPosition.longValue,
+                durationMs = totalMs,
+                dragging = dragging,
+                sliderPos = sliderPos,
+                onSliderChange = { sliderPos = it; dragging = true },
+                onSliderFinish = { onSeek(sliderPos.toLong()); dragging = false },
+                onTogglePlay = onTogglePlay,
+                onPrevious = onPrevious,
+                onNext = onNext,
+            )
+            Spacer(Modifier.weight(1f))
+        }
+    }
+}
+
+/* ---------------- 独立全屏歌词页 ---------------- */
+
+@Composable
+private fun LyricsFullScreen(
+    track: TrackItem,
+    lyrics: List<LrcLine>,
+    isPlaying: Boolean,
+    positionMs: Long,
+    durationMs: Long,
+    onBack: () -> Unit,
+    onTogglePlay: () -> Unit,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    onSeek: (Long) -> Unit,
+    dragging: Boolean,
+    sliderPos: Float,
+    onSliderChange: (Float) -> Unit,
+    onSliderFinish: () -> Unit,
+) {
     Column(
-        modifier
+        Modifier
             .fillMaxSize()
             .padding(horizontal = 28.dp, vertical = 14.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -542,143 +769,327 @@ private fun PlayerScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.Filled.ArrowBack, contentDescription = "返回", tint = Color.White)
+                Icon(Icons.Filled.ArrowBack, contentDescription = "返回封面", tint = Color.White)
             }
             Spacer(Modifier.weight(1f))
-            Text(
-                "正在播放",
-                color = Color.White.copy(alpha = 0.85f),
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium,
-            )
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    "歌词",
+                    color = Color.White.copy(alpha = 0.85f),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+                Text(
+                    track.title,
+                    color = Color.White.copy(alpha = 0.6f),
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             Spacer(Modifier.weight(1f))
             Spacer(Modifier.width(48.dp))
         }
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(8.dp))
 
-        // 旋转封面
-        val infinite = rememberInfiniteTransition(label = "cover")
-        val angle by infinite.animateFloat(
-            initialValue = 0f,
-            targetValue = 360f,
-            animationSpec = infiniteRepeatable(tween(20000, easing = LinearEasing)),
-            label = "angle",
-        )
-        Box(
-            Modifier
-                .size(230.dp)
-                .graphicsLayer { rotationZ = angle }
-                .clip(CircleShape)
-                .background(trackBrush(track.title, true)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                track.title.firstOrNull()?.uppercase() ?: "♪",
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-                fontSize = 84.sp,
-            )
-        }
-        Spacer(Modifier.height(22.dp))
-
-        // 歌词区（高亮当前行 + 自动滚动 + 点击跳转）
-        if (lyrics.isNotEmpty()) {
-            LyricsPanel(
-                lyrics = lyrics,
-                positionMs = playerPosition.longValue,
-                onSeek = onSeek,
-            )
-        }
-        Spacer(Modifier.height(10.dp))
-
-        // 曲目信息
-        Text(
-            track.title,
-            color = Color.White,
-            fontSize = 21.sp,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+        // 大歌词（自动滚动 + 点击跳转 + 当前行高亮）
+        LyricsBigPanel(
+            lyrics = lyrics,
+            positionMs = positionMs,
+            onSeek = onSeek,
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
         )
         Spacer(Modifier.height(6.dp))
-        Text(
-            track.artist,
-            color = Color.White.copy(alpha = 0.65f),
-            fontSize = 14.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Spacer(Modifier.height(26.dp))
 
-        // 进度条
-        val sliderMax = if (totalMs > 0) totalMs.toFloat() else 1f
-        Slider(
-            value = sliderPos.coerceIn(0f, sliderMax),
-            onValueChange = {
-                sliderPos = it
-                dragging = true
-            },
-            onValueChangeFinished = {
-                onSeek(sliderPos.toLong())
-                dragging = false
-            },
-            valueRange = 0f..sliderMax,
-            colors = SliderDefaults.colors(
-                thumbColor = Color.White,
-                activeTrackColor = Color.White,
-                inactiveTrackColor = Color.White.copy(alpha = 0.28f),
-            ),
-            modifier = Modifier.fillMaxWidth(),
+        PlayerControls(
+            isPlaying = isPlaying,
+            positionMs = positionMs,
+            durationMs = durationMs,
+            dragging = dragging,
+            sliderPos = sliderPos,
+            onSliderChange = onSliderChange,
+            onSliderFinish = onSliderFinish,
+            onTogglePlay = onTogglePlay,
+            onPrevious = onPrevious,
+            onNext = onNext,
         )
-        Row(Modifier.fillMaxWidth()) {
-            Text(
-                formatTime(if (dragging) sliderPos.toLong() else playerPosition.longValue),
-                color = Color.White.copy(alpha = 0.6f),
-                fontSize = 12.sp,
-            )
-            Spacer(Modifier.weight(1f))
-            Text(
-                formatTime(totalMs),
-                color = Color.White.copy(alpha = 0.6f),
-                fontSize = 12.sp,
-            )
-        }
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(6.dp))
+    }
+}
 
-        // 控制排
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center,
+/* ---------------- 横屏双列歌词 ---------------- */
+
+@Composable
+private fun PlayerLandscape(
+    track: TrackItem,
+    lyrics: List<LrcLine>,
+    isPlaying: Boolean,
+    positionMs: Long,
+    durationMs: Long,
+    onBack: () -> Unit,
+    onTogglePlay: () -> Unit,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    onSeek: (Long) -> Unit,
+    dragging: Boolean,
+    sliderPos: Float,
+    onSliderChange: (Float) -> Unit,
+    onSliderFinish: () -> Unit,
+    openLyrics: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier
+            .fillMaxSize()
+            .padding(horizontal = 28.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // 左列：封面 + 信息 + 控制
+        Column(
+            Modifier.weight(0.42f),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            IconButton(onClick = onPrevious) {
-                SkipPreviousIcon(color = Color.White, size = 30.dp)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.Filled.ArrowBack, contentDescription = "返回", tint = Color.White)
+                }
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "正在播放",
+                    color = Color.White.copy(alpha = 0.8f),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.width(48.dp))
             }
-            Spacer(Modifier.width(30.dp))
+            Spacer(Modifier.weight(1f))
+
+            val infinite = rememberInfiniteTransition(label = "cover-l")
+            val angle by infinite.animateFloat(
+                initialValue = 0f,
+                targetValue = 360f,
+                animationSpec = infiniteRepeatable(tween(20000, easing = LinearEasing)),
+                label = "angle-l",
+            )
             Box(
                 Modifier
-                    .size(72.dp)
+                    .size(228.dp)
+                    .graphicsLayer { rotationZ = angle }
                     .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.92f))
-                    .clickable(onClick = onTogglePlay),
+                    .background(trackBrush(track.title, true)),
                 contentAlignment = Alignment.Center,
             ) {
-                if (isPlaying) {
-                    PauseIcon(color = Color(0xFF2A2A44), size = 28.dp)
-                } else {
-                    Icon(
-                        Icons.Filled.PlayArrow,
-                        contentDescription = "播放",
-                        tint = Color(0xFF2A2A44),
-                        modifier = Modifier.size(32.dp),
+                Text(
+                    track.title.firstOrNull()?.uppercase() ?: "♪",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 80.sp,
+                )
+            }
+            Spacer(Modifier.height(18.dp))
+            Text(
+                track.title,
+                color = Color.White,
+                fontSize = 19.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                track.artist,
+                color = Color.White.copy(alpha = 0.65f),
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.weight(1f))
+        }
+
+        Spacer(Modifier.width(20.dp))
+
+        // 右列：大歌词 + 进度控制
+        Column(Modifier.weight(0.58f)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "歌词",
+                    color = Color.White.copy(alpha = 0.8f),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+                Spacer(Modifier.weight(1f))
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color.White.copy(alpha = 0.14f))
+                        .clickable(onClick = openLyrics)
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("全屏歌词", color = Color.White.copy(alpha = 0.85f), fontSize = 11.sp)
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            LyricsBigPanel(
+                lyrics = lyrics,
+                positionMs = positionMs,
+                onSeek = onSeek,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+            )
+            Spacer(Modifier.height(4.dp))
+            PlayerControls(
+                isPlaying = isPlaying,
+                positionMs = positionMs,
+                durationMs = durationMs,
+                dragging = dragging,
+                sliderPos = sliderPos,
+                onSliderChange = onSliderChange,
+                onSliderFinish = onSliderFinish,
+                onTogglePlay = onTogglePlay,
+                onPrevious = onPrevious,
+                onNext = onNext,
+            )
+        }
+    }
+}
+
+/* ---------------- 控制排（进度 + 播放控制） ---------------- */
+
+@Composable
+private fun PlayerControls(
+    isPlaying: Boolean,
+    positionMs: Long,
+    durationMs: Long,
+    dragging: Boolean,
+    sliderPos: Float,
+    onSliderChange: (Float) -> Unit,
+    onSliderFinish: () -> Unit,
+    onTogglePlay: () -> Unit,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+) {
+    val sliderMax = if (durationMs > 0) durationMs.toFloat() else 1f
+    Slider(
+        value = sliderPos.coerceIn(0f, sliderMax),
+        onValueChange = onSliderChange,
+        onValueChangeFinished = onSliderFinish,
+        valueRange = 0f..sliderMax,
+        colors = SliderDefaults.colors(
+            thumbColor = Color.White,
+            activeTrackColor = Color.White,
+            inactiveTrackColor = Color.White.copy(alpha = 0.28f),
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Row(Modifier.fillMaxWidth()) {
+        Text(
+            formatTime(if (dragging) sliderPos.toLong() else positionMs),
+            color = Color.White.copy(alpha = 0.6f),
+            fontSize = 12.sp,
+        )
+        Spacer(Modifier.weight(1f))
+        Text(
+            formatTime(durationMs),
+            color = Color.White.copy(alpha = 0.6f),
+            fontSize = 12.sp,
+        )
+    }
+    Spacer(Modifier.height(10.dp))
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        IconButton(onClick = onPrevious) {
+            SkipPreviousIcon(color = Color.White, size = 30.dp)
+        }
+        Spacer(Modifier.width(30.dp))
+        Box(
+            Modifier
+                .size(66.dp)
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.92f))
+                .clickable(onClick = onTogglePlay),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (isPlaying) {
+                PauseIcon(color = Color(0xFF2A2A44), size = 26.dp)
+            } else {
+                Icon(
+                    Icons.Filled.PlayArrow,
+                    contentDescription = "播放",
+                    tint = Color(0xFF2A2A44),
+                    modifier = Modifier.size(30.dp),
+                )
+            }
+        }
+        Spacer(Modifier.width(30.dp))
+        IconButton(onClick = onNext) {
+            SkipNextIcon(color = Color.White, size = 30.dp)
+        }
+    }
+}
+
+/* ---------------- 大歌词面板（自动滚动 + 空态提示） ---------------- */
+
+@Composable
+private fun LyricsBigPanel(
+    lyrics: List<LrcLine>,
+    positionMs: Long,
+    onSeek: (Long) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val listState = rememberLazyListState()
+    val currentIndex = lyrics.indexOfLast { it.timeMs <= positionMs + 50 }
+    LaunchedEffect(currentIndex) {
+        if (currentIndex >= 0) listState.animateScrollToItem(currentIndex)
+    }
+    if (lyrics.isEmpty()) {
+        Box(modifier, contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("♪", fontSize = 42.sp, color = Color.White.copy(alpha = 0.3f))
+                Spacer(Modifier.height(12.dp))
+                Text("未找到歌词", color = Color.White.copy(alpha = 0.78f), fontWeight = FontWeight.Medium)
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "将同名 .lrc 文件放入歌曲目录\n或使用含内嵌歌词（USLT）的音频",
+                    fontSize = 12.sp,
+                    color = Color.White.copy(alpha = 0.5f),
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+    } else {
+        LazyColumn(
+            state = listState,
+            modifier = modifier,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            itemsIndexed(lyrics) { i, line ->
+                val active = i == currentIndex
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { onSeek(line.timeMs) }
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = line.text,
+                        fontSize = if (active) 24.sp else 15.sp,
+                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (active) Color.White else Color.White.copy(alpha = 0.5f),
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
-            Spacer(Modifier.width(30.dp))
-            IconButton(onClick = onNext) {
-                SkipNextIcon(color = Color.White, size = 30.dp)
-            }
         }
-        Spacer(Modifier.weight(1f))
     }
 }
 
@@ -690,6 +1101,7 @@ private fun ColumnScope.LyricsPanel(
     lyrics: List<LrcLine>,
     positionMs: Long,
     onSeek: (Long) -> Unit,
+    onOpenFull: () -> Unit = {},
 ) {
     val listState = rememberLazyListState()
     val currentIndex = lyrics.indexOfLast { it.timeMs <= positionMs + 50 }
@@ -872,3 +1284,125 @@ private suspend fun scanTracks(context: Context): List<TrackItem> = withContext(
     }
     result
 }
+
+
+/* ---------------- 自绘小图标 ---------------- */
+
+@Composable
+fun LyricsIcon(color: Color, size: androidx.compose.ui.unit.Dp) {
+    androidx.compose.foundation.Canvas(Modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val lw = w * 0.10f
+        // 三行歌词线
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(w * 0.12f, h * 0.22f),
+            size = androidx.compose.ui.geometry.Size(w * 0.55f, lw),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(lw / 2f),
+        )
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(w * 0.12f, h * 0.48f),
+            size = androidx.compose.ui.geometry.Size(w * 0.76f, lw),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(lw / 2f),
+        )
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(w * 0.12f, h * 0.74f),
+            size = androidx.compose.ui.geometry.Size(w * 0.42f, lw),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(lw / 2f),
+        )
+    }
+}
+
+@Composable
+fun FolderIcon(color: Color, size: androidx.compose.ui.unit.Dp) {
+    androidx.compose.foundation.Canvas(Modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val path = androidx.compose.ui.graphics.Path().apply {
+            moveTo(w * 0.06f, h * 0.24f)
+            lineTo(w * 0.06f, h * 0.82f)
+            lineTo(w * 0.94f, h * 0.82f)
+            lineTo(w * 0.94f, h * 0.30f)
+            lineTo(w * 0.46f, h * 0.30f)
+            lineTo(w * 0.38f, h * 0.18f)
+            lineTo(w * 0.14f, h * 0.18f)
+            close()
+        }
+        drawPath(path, color)
+    }
+}
+
+/* ---------------- SAF 文件夹扫描 ---------------- */
+
+/** 递归扫描 SAF 树：收集音频文件 + 同目录同名 .lrc（作为 lyricUri） */
+fun scanAudioInTree(context: Context, treeUri: Uri): List<TrackItem> {
+    val out = mutableListOf<TrackItem>()
+    val audioExt = setOf("mp3", "flac", "wav", "m4a", "aac", "ogg", "opus", "wma", "ape", "mp4")
+
+    // 第一遍：收集每目录的文件（name -> childUri），第二遍匹配 .lrc
+    data class DirFiles(val docId: String, val files: MutableMap<String, Pair<Uri, String>>)
+
+    val dirs = mutableListOf<DirFiles>()
+    val dirNotFound = mutableListOf<Uri>()
+    dirNotFound.add(treeUri)
+
+    fun walk(uri: Uri, rootTree: Uri, dirs: MutableList<DirFiles>) {
+        try {
+            val docId = DocumentsContract.getDocumentId(uri)
+            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+                rootTree, docId
+            )
+            val projection = arrayOf(
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE,
+            )
+            val dirCurrent = DirFiles(docId, mutableMapOf())
+            dirs.add(dirCurrent)
+            val c: Cursor? = context.contentResolver.query(
+                childrenUri, projection, null, null, null
+            )
+            c?.use {
+                while (it.moveToNext()) {
+                    val childDocId = it.getString(0) ?: continue
+                    val name = it.getString(1) ?: continue
+                    val mime = it.getString(2) ?: ""
+                    val childUri = DocumentsContract.buildDocumentUriUsingTree(rootTree, childDocId)
+                    if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
+                        walk(childUri, rootTree, dirs)
+                    } else {
+                        dirCurrent.files[name] = childUri to mime
+                    }
+                }
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    walk(treeUri, treeUri, dirs)
+
+    // 遍历目录，组装 TrackItem
+    dirs.forEach { dir ->
+        dir.files.forEach { (name, pair) ->
+            val (uri, mime) = pair
+            val ext = name.substringAfterLast('.', "").lowercase()
+            if (ext in audioExt || mime.startsWith("audio/")) {
+                val base = name.substringBeforeLast('.')
+                val lrcUri = dir.files["$base.lrc"]?.first
+                out += TrackItem(
+                    id = -(System.nanoTime() + out.size),
+                    uri = uri,
+                    title = base.ifBlank { name },
+                    artist = queryDisplayName(context, treeUri) ?: "文件夹",
+                    durationMs = 0L,
+                    lyricUri = lrcUri,
+                )
+            }
+        }
+    }
+    return out
+}
+
