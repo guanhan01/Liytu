@@ -47,6 +47,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -289,7 +290,12 @@ private fun NovelReaderPage(novel: NovelItem, context: Context, onBack: () -> Un
                     Text("正在排版…", color = Color.White.copy(alpha = 0.7f))
                 }
             } else {
-                PagedReader(title = novel.name, text = text, onBack = onBack)
+                PagedReader(
+                    title = novel.name,
+                    text = text,
+                    progressKey = "book_" + novel.uri.toString().hashCode(),
+                    onBack = onBack,
+                )
             }
         }
     }
@@ -298,7 +304,10 @@ private fun NovelReaderPage(novel: NovelItem, context: Context, onBack: () -> Un
 /** 分页文本阅读器：多字体 / 字号 / 行高 / 翻页动画 */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun PagedReader(title: String, text: String, onBack: () -> Unit) {
+private fun PagedReader(title: String, text: String, progressKey: String, onBack: () -> Unit) {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("liytu_progress", Context.MODE_PRIVATE) }
+    val savedPage = remember { prefs.getInt(progressKey, 0) }
     var fontSize by rememberSaveable { mutableFloatStateOf(19f) }
     var lineHeightFactor by rememberSaveable { mutableFloatStateOf(1.7f) }
     var fontName by rememberSaveable { mutableStateOf("sans") }
@@ -319,7 +328,19 @@ private fun PagedReader(title: String, text: String, onBack: () -> Unit) {
         color = Color.White.copy(alpha = 0.92f),
     )
     var pages by remember { mutableStateOf<List<String>>(emptyList()) }
-    val pagerState = rememberPagerState(pageCount = { pages.size })
+    val pagerState = rememberPagerState(initialPage = savedPage, pageCount = { pages.size })
+    LaunchedEffect(pages, savedPage) {
+        if (pages.isNotEmpty()) {
+            val target = savedPage.coerceIn(0, pages.size - 1)
+            if (pagerState.currentPage != target) pagerState.scrollToPage(target)
+        }
+    }
+    LaunchedEffect(pagerState.currentPage) {
+        if (pages.isNotEmpty()) prefs.edit().putInt(progressKey, pagerState.currentPage).apply()
+    }
+    DisposableEffect(Unit) {
+        onDispose { prefs.edit().putInt(progressKey, pagerState.currentPage).apply() }
+    }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val maxW = constraints.maxWidth
@@ -543,7 +564,24 @@ private fun PdfReaderPage(novel: NovelItem, context: Context, onBack: () -> Unit
             null
         }
     }
-    val pagerState = rememberPagerState(pageCount = { renderer?.pageCount ?: 0 })
+    val bookPrefs = remember { context.getSharedPreferences("liytu_progress", Context.MODE_PRIVATE) }
+    val pdfKey = "pdf_" + novel.uri.toString().hashCode()
+    val savedPdfPage = remember { bookPrefs.getInt(pdfKey, 0) }
+    val pagerState = rememberPagerState(initialPage = savedPdfPage, pageCount = { renderer?.pageCount ?: 0 })
+    LaunchedEffect(renderer, savedPdfPage) {
+        val total = renderer?.pageCount ?: 0
+        if (total > 0) {
+            val target = savedPdfPage.coerceIn(0, total - 1)
+            if (pagerState.currentPage != target) pagerState.scrollToPage(target)
+        }
+    }
+    LaunchedEffect(pagerState.currentPage) {
+        val total = renderer?.pageCount ?: 0
+        if (total > 0) bookPrefs.edit().putInt(pdfKey, pagerState.currentPage).apply()
+    }
+    DisposableEffect(Unit) {
+        onDispose { bookPrefs.edit().putInt(pdfKey, pagerState.currentPage).apply() }
+    }
 
     BackHandler { onBack() }
 
@@ -681,7 +719,22 @@ private fun ComicsBrowsePage(
 ) {
     // 内容与现版本一致：按文件名排序的 HorizontalPager 翻页
     val sorted = remember(images) { images.sortedBy { queryDisplayName(context, it) ?: "" } }
-    val pagerState = rememberPagerState(pageCount = { sorted.size })
+    val comicPrefs = remember { context.getSharedPreferences("liytu_progress", Context.MODE_PRIVATE) }
+    val comicKey = "comics_" + name.hashCode()
+    val savedComicPage = remember { comicPrefs.getInt(comicKey, 0) }
+    val pagerState = rememberPagerState(initialPage = savedComicPage, pageCount = { sorted.size })
+    LaunchedEffect(sorted, savedComicPage) {
+        if (sorted.isNotEmpty()) {
+            val target = savedComicPage.coerceIn(0, sorted.size - 1)
+            if (pagerState.currentPage != target) pagerState.scrollToPage(target)
+        }
+    }
+    LaunchedEffect(pagerState.currentPage) {
+        if (sorted.isNotEmpty()) comicPrefs.edit().putInt(comicKey, pagerState.currentPage).apply()
+    }
+    DisposableEffect(Unit) {
+        onDispose { comicPrefs.edit().putInt(comicKey, pagerState.currentPage).apply() }
+    }
 
     BackHandler { onBack() }
 
