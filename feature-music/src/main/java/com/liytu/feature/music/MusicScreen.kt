@@ -1659,7 +1659,7 @@ private fun EqPanel(manager: PlayerManager, modifier: Modifier = Modifier) {
             runCatching {
                 eq.setBandLevel(
                     i.toShort(),
-                    (levelRange.first + (levels[i] * (levelRange.second - levelRange.first))).toShort(),
+                    (levelRange.first + (levels[i] * (levelRange.second - levelRange.first))).toInt().toShort(),
                 )
             }
         }
@@ -1720,7 +1720,7 @@ private fun EqPanel(manager: PlayerManager, modifier: Modifier = Modifier) {
                                 runCatching {
                                     eq.setBandLevel(
                                         idx.toShort(),
-                                        (levelRange.first + (it * (levelRange.second - levelRange.first))).toShort(),
+                                        (levelRange.first + (it * (levelRange.second - levelRange.first))).toInt().toShort(),
                                     )
                                 }
                             },
