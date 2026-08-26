@@ -29,5 +29,8 @@ dependencies {
 
     implementation(libs.zip4j)
     implementation(libs.pdfbox.android)
-    implementation(libs.epublib)
+    // epub 解析；kxml2 已内嵌 xmlpull 接口，排除重复的 xmlpull jar
+    implementation(libs.epublib) {
+        exclude(group = "xmlpull", module = "xmlpull")
+    }
 }
