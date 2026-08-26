@@ -7,8 +7,12 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+
+/** 当前 UI 风格（Miuix / Material），由主题预设驱动 */
+val LocalAppStyle = staticCompositionLocalOf { ThemeStyle.MIUIX }
 
 /** Liytu 全局主题入口：根据预设生成 Material3 配色，并包裹 Miuix 主题 */
 @Composable
@@ -62,7 +66,10 @@ fun LiytuTheme(
         colorScheme = scheme,
         shapes = liytuShapes(preset.globalCornerRadius),
         content = {
-            CompositionLocalProvider(LocalLiytuPreset provides preset) {
+            CompositionLocalProvider(
+                LocalLiytuPreset provides preset,
+                LocalAppStyle provides preset.style,
+            ) {
                 MiuixTheme {
                     content()
                 }
