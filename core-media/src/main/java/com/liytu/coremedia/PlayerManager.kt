@@ -3,9 +3,8 @@ package com.liytu.coremedia
 import android.content.Context
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.ffmpeg.FfmpegAudioRenderer
-import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 
 /**
  * 统一播放管理器（第一阶段：本地音频播放）。
@@ -16,11 +15,9 @@ class PlayerManager(context: Context) {
     val player: ExoPlayer
 
     init {
-        val renderersFactory = androidx.media3.exoplayer.DefaultRenderersFactory(context)
-            .setExtensionRendererMode(androidx.media3.exoplayer.DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+        val renderersFactory = DefaultRenderersFactory(context)
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
         player = ExoPlayer.Builder(context, renderersFactory).build()
-        // 保证 FFmpeg 软解器可用（媒体项里带 codec 限制时自动选择）
-        player.setMediaCodecSelector(MediaCodecSelector.DEFAULT)
     }
 
     fun play(items: List<MediaItem>, startIndex: Int = 0) {
