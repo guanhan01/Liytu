@@ -5,6 +5,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.graphics.Color
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -61,8 +62,10 @@ fun LiytuTheme(
         colorScheme = scheme,
         shapes = liytuShapes(preset.globalCornerRadius),
         content = {
-            MiuixTheme {
-                content()
+            CompositionLocalProvider(LocalLiytuPreset provides preset) {
+                MiuixTheme {
+                    content()
+                }
             }
         }
     )
@@ -72,5 +75,5 @@ fun LiytuTheme(
 object LiytuThemeAccess {
     val currentPreset: LiytuThemePreset
         @Composable @ReadOnlyComposable
-        get() = androidx.compose.runtime.LocalLiytuPreset.current
+        get() = LocalLiytuPreset.current
 }
