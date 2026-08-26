@@ -1,6 +1,7 @@
 package com.liytu.feature.music
 
 import android.content.Context
+import android.media.MediaMetadataRetriever
 import android.provider.MediaStore
 import java.io.File
 import java.nio.charset.Charset
@@ -45,10 +46,29 @@ fun parseLrc(content: String): List<LrcLine> {
 }
 
 /**
- * 读取歌曲同目录同名 .lrc 文件（基于 MediaStore DATA 路径）。
- * SAF 导入的歌曲无文件路径，返回空列表（可接受）。
+ * 歌词加载（优先级）：
+ * 1. 音频内嵌歌词标签（ID3 USLT 等）—— 走 content:// URI 授权，分区存储下最可靠
+ * 2. 同目录同名 .lrc 文件（MediaStore DATA 路径；仅 Android 12 及以下 / 文件权限放行时可用）
  */
 fun loadLrcFromTrack(context: Context, track: TrackItem): List<LrcLine> {
+    // 1. 内嵌歌词
+    val embedded = try {
+        val retriever = MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(context, track.uri)
+            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_LYRIC)
+        } catch (_: Exception) {
+            null
+        } finally {
+            try { retriever.release() } catch (_: Exception) { }
+        }
+    } catch (_: Exception) {
+        null
+    }
+    val embeddedLrc = embedded?.takeIf { it.isNotBlank() }?.let { parseLrc(it) }
+    if (!embeddedLrc.isNullOrEmpty()) return embeddedLrc
+
+    // 2. 同目录 .lrc
     val path = queryAudioPath(context, track.id) ?: return emptyList()
     val file = File(path)
     val lrcFile = file.parentFile?.let { File(it, file.nameWithoutExtension + ".lrc") } ?: return emptyList()
