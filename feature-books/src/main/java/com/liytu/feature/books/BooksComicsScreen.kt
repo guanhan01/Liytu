@@ -471,7 +471,7 @@ private fun readTextSmart(context: Context, uri: Uri): String {
         if (!utf8.contains('\uFFFD')) {
             utf8.take(300_000)
         } else {
-            String(bytes, Charsets.GBK).take(300_000)
+            String(bytes, java.nio.charset.Charset.forName("GBK")).take(300_000)
         }
     } catch (_: Exception) {
         ""
