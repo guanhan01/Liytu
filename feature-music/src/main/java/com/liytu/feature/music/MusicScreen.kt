@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -178,6 +179,11 @@ fun MusicScreen(modifier: Modifier = Modifier) {
     val allTracks = remember(tracks, imported) { tracks + imported }
     val currentTrack = allTracks.getOrNull(currentIndex)
 
+    // 歌词：同目录同名 .lrc
+    val lyrics = remember(currentTrack) {
+        currentTrack?.let { loadLrcFromTrack(context, it) } ?: emptyList()
+    }
+
     // 播放
     fun playAt(index: Int) {
         if (index < 0 || index >= allTracks.size) return
@@ -189,6 +195,7 @@ fun MusicScreen(modifier: Modifier = Modifier) {
     if (showPlayer && currentTrack != null) {
         PlayerScreen(
             track = currentTrack,
+            lyrics = lyrics,
             isPlaying = isPlaying,
             positionMs = playerManager.player.currentPosition,
             durationMs = if (playerManager.player.duration > 0) playerManager.player.duration else currentTrack.durationMs,
@@ -492,6 +499,7 @@ private fun MiniPlayerBar(
 @Composable
 private fun PlayerScreen(
     track: TrackItem,
+    lyrics: List<LrcLine> = emptyList(),
     isPlaying: Boolean,
     positionMs: Long,
     durationMs: Long,
@@ -570,7 +578,17 @@ private fun PlayerScreen(
                 fontSize = 84.sp,
             )
         }
-        Spacer(Modifier.height(34.dp))
+        Spacer(Modifier.height(22.dp))
+
+        // 歌词区（高亮当前行 + 自动滚动 + 点击跳转）
+        if (lyrics.isNotEmpty()) {
+            LyricsPanel(
+                lyrics = lyrics,
+                positionMs = playerPosition.longValue,
+                onSeek = onSeek,
+            )
+        }
+        Spacer(Modifier.height(10.dp))
 
         // 曲目信息
         Text(
@@ -660,6 +678,50 @@ private fun PlayerScreen(
             }
         }
         Spacer(Modifier.weight(1f))
+    }
+}
+
+
+/* ---------------- 歌词面板 ---------------- */
+
+@Composable
+private fun ColumnScope.LyricsPanel(
+    lyrics: List<LrcLine>,
+    positionMs: Long,
+    onSeek: (Long) -> Unit,
+) {
+    val listState = rememberLazyListState()
+    val currentIndex = lyrics.indexOfLast { it.timeMs <= positionMs + 50 }
+    LaunchedEffect(currentIndex) {
+        if (currentIndex >= 0) listState.animateScrollToItem(currentIndex)
+    }
+    LazyColumn(
+        state = listState,
+        modifier = Modifier
+            .fillMaxWidth()
+            .weight(1f),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        itemsIndexed(lyrics) { i, line ->
+            val active = i == currentIndex
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { onSeek(line.timeMs) }
+                    .padding(vertical = 7.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = line.text,
+                    fontSize = if (active) 17.sp else 14.sp,
+                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (active) Color.White else Color.White.copy(alpha = 0.55f),
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
     }
 }
 
