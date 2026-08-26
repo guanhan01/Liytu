@@ -423,8 +423,10 @@ private fun PresetChip(preset: LiytuThemePreset, selected: Boolean, onClick: () 
                 .size(64.dp)
                 .clip(RoundedCornerShape(16.dp))
                 .background(
-                    if (preset.isSolid) Color(preset.keyColor)
-                    else Brush.linearGradient(listOf(preset.key, preset.accent))
+                    Brush.linearGradient(
+                        if (preset.isSolid) listOf(preset.key, preset.key)
+                        else listOf(preset.key, preset.accent)
+                    )
                 )
                 .border(if (selected) 2.dp else 1.dp, borderColor, RoundedCornerShape(16.dp)),
             contentAlignment = Alignment.Center,
