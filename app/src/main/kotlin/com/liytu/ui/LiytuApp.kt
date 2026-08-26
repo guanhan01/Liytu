@@ -1,11 +1,22 @@
 package com.liytu.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.List
@@ -15,6 +26,7 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -30,14 +42,12 @@ import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.liytu.coreui.liquid.LiquidBottomTab
 import com.liytu.coreui.liquid.LiquidBottomTabs
 import com.liytu.coreui.theme.LiytuThemePreset
+import com.liytu.coreui.theme.LocalAppBackdrop
 import com.liytu.feature.books.BooksComicsScreen
 import com.liytu.feature.home.HomeScreen
 import com.liytu.feature.mine.MineScreen
 import com.liytu.feature.music.MusicScreen
 import com.liytu.feature.video.VideoScreen
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.size
-import androidx.compose.ui.graphics.ColorFilter
 
 private val tabIcons = listOf<ImageVector>(
     Icons.Filled.Home,
@@ -54,7 +64,7 @@ fun LiytuApp(preset: LiytuThemePreset, onPresetChange: (LiytuThemePreset) -> Uni
     val backdrop = rememberLayerBackdrop()
 
     Box(Modifier.fillMaxSize()) {
-        // 液态玻璃背景层
+        // 液态玻璃背景层：渐变铺满（含状态栏区域）
         Box(
             Modifier
                 .fillMaxSize()
@@ -70,37 +80,71 @@ fun LiytuApp(preset: LiytuThemePreset, onPresetChange: (LiytuThemePreset) -> Uni
                     )
                 )
         )
-        Column(Modifier.fillMaxSize()) {
-            Box(Modifier.weight(1f).fillMaxSize()) {
-                when (selected) {
-                    0 -> HomeScreen(backdrop = backdrop, onOpenTab = { selected = it })
-                    1 -> MusicScreen()
-                    2 -> VideoScreen()
-                    3 -> BooksComicsScreen()
-                    4 -> MineScreen(current = preset, onPresetChange = onPresetChange)
-                }
-            }
-            Row(Modifier.navigationBarsPadding().padding(horizontal = 14.dp, vertical = 10.dp)) {
-                LiquidBottomTabs(
-                    selectedTabIndex = { selected },
-                    onTabSelected = { selected = it },
-                    backdrop = backdrop,
-                    tabsCount = 5,
-                    modifier = Modifier.padding(horizontal = 6.dp).weight(1f),
+        // 内容层：全局提供 backdrop，供所有 GlassCard 使用
+        CompositionLocalProvider(LocalAppBackdrop provides backdrop) {
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+            ) {
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxSize()
                 ) {
-                    repeat(5) { index ->
-                        LiquidBottomTab(onClick = { selected = index }) {
-                            Icon(
-                                imageVector = tabIcons[index],
-                                contentDescription = tabLabels[index],
-                                modifier = Modifier.size(24.dp),
-                                tint = Color.White,
-                            )
-                            Text(
-                                text = tabLabels[index],
-                                fontSize = 11.sp,
-                                color = Color.White,
-                            )
+                    // 页面转场：slide + fade，方向随 tab 切换
+                    AnimatedContent(
+                        targetState = selected,
+                        transitionSpec = {
+                            val dir = if (targetState > initialState) 1 else -1
+                            (slideInHorizontally(
+                                tween(350, easing = FastOutSlowInEasing)
+                            ) { it / 4 * dir } + fadeIn(tween(350))) togetherWith
+                                (slideOutHorizontally(
+                                    tween(350, easing = FastOutSlowInEasing)
+                                ) { -it / 4 * dir } + fadeOut(tween(200)))
+                        },
+                        modifier = Modifier.fillMaxSize(),
+                        label = "tab",
+                    ) { tab ->
+                        when (tab) {
+                            0 -> HomeScreen(onOpenTab = { selected = it })
+                            1 -> MusicScreen()
+                            2 -> VideoScreen()
+                            3 -> BooksComicsScreen()
+                            4 -> MineScreen(current = preset, onPresetChange = onPresetChange)
+                        }
+                    }
+                }
+                // 底部液态玻璃导航
+                Row(
+                    Modifier
+                        .navigationBarsPadding()
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                ) {
+                    LiquidBottomTabs(
+                        selectedTabIndex = { selected },
+                        onTabSelected = { selected = it },
+                        backdrop = backdrop,
+                        tabsCount = 5,
+                        modifier = Modifier
+                            .padding(horizontal = 6.dp)
+                            .weight(1f),
+                    ) {
+                        repeat(5) { index ->
+                            LiquidBottomTab(onClick = { selected = index }) {
+                                Icon(
+                                    imageVector = tabIcons[index],
+                                    contentDescription = tabLabels[index],
+                                    modifier = Modifier.size(24.dp),
+                                    tint = Color.White,
+                                )
+                                Text(
+                                    text = tabLabels[index],
+                                    fontSize = 11.sp,
+                                    color = Color.White,
+                                )
+                            }
                         }
                     }
                 }
