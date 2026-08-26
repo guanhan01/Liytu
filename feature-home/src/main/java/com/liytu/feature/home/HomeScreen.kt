@@ -46,6 +46,7 @@ import com.liytu.coreui.components.GlassCard
 fun HomeScreen(
     backdrop: Backdrop? = null,
     onOpenTab: (Int) -> Unit = {},
+    usageTexts: Map<Int, String> = emptyMap(),
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -96,6 +97,7 @@ fun HomeScreen(
                 subtitle = "本地播放 · 歌词",
                 icon = Icons.Filled.PlayArrow,
                 colors = listOf(Color(0xFF7C4DFF), Color(0xFF448AFF)),
+                usageText = usageTexts[1],
                 modifier = Modifier.weight(1f),
                 onClick = { onOpenTab(1) },
             )
@@ -104,6 +106,7 @@ fun HomeScreen(
                 subtitle = "选集 · 换集 · 倍速",
                 icon = Icons.Filled.Star,
                 colors = listOf(Color(0xFFFF6FA0), Color(0xFFFF9A3D)),
+                usageText = usageTexts[2],
                 modifier = Modifier.weight(1f),
                 onClick = { onOpenTab(2) },
             )
@@ -115,6 +118,7 @@ fun HomeScreen(
                 subtitle = "小说 · 漫画",
                 icon = Icons.Filled.List,
                 colors = listOf(Color(0xFF00B4D8), Color(0xFF3DDC97)),
+                usageText = usageTexts[3],
                 modifier = Modifier.weight(1f),
                 onClick = { onOpenTab(3) },
             )
@@ -123,6 +127,7 @@ fun HomeScreen(
                 subtitle = "主题 · 设置",
                 icon = Icons.Filled.Person,
                 colors = listOf(Color(0xFFFF7EB3), Color(0xFF7C6FFF)),
+                usageText = usageTexts[4],
                 modifier = Modifier.weight(1f),
                 onClick = { onOpenTab(4) },
             )
@@ -216,6 +221,7 @@ private fun FeatureEntryCard(
     subtitle: String,
     icon: ImageVector,
     colors: List<Color>,
+    usageText: String? = null,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
@@ -267,6 +273,14 @@ private fun FeatureEntryCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = Color.White.copy(alpha = 0.74f),
             )
+            if (!usageText.isNullOrBlank()) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "最近使用 $usageText",
+                    fontSize = 11.sp,
+                    color = Color.White.copy(alpha = 0.55f),
+                )
+            }
         }
     }
 }
