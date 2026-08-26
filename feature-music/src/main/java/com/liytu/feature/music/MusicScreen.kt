@@ -89,6 +89,11 @@ import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.filled.Sort
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.ui.text.AnnotatedString
@@ -485,7 +490,7 @@ private fun MusicListScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Text(
-                                        name,
+                                        name.substringAfterLast('/').ifBlank { name },
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         color = Color.White.copy(alpha = 0.9f),
@@ -1161,15 +1166,6 @@ private fun PlayerControls(
         IconButton(onClick = onNext) {
             SkipNextIcon(color = Color.White, size = 30.dp)
         }
-        Spacer(Modifier.width(16.dp))
-        IconButton(onClick = { manager.toggleShuffle() }) {
-            Icon(
-                Icons.Filled.Shuffle,
-                contentDescription = "随机播放",
-                tint = if (manager.playMode == PlayMode.SHUFFLE) Color.White else Color.White.copy(alpha = 0.35f),
-                modifier = Modifier.size(21.dp),
-            )
-        }
     }
 }
 
@@ -1428,7 +1424,7 @@ private suspend fun scanTracks(context: Context): List<TrackItem> = withContext(
                 artist = cursor.getString(artistCol)?.takeIf { it.isNotBlank() && it != "<unknown>" } ?: "未知艺术家",
                 durationMs = cursor.getLong(durationCol),
                 album = cursor.getString(albumCol)?.takeIf { it.isNotBlank() && it != "<unknown>" },
-                folder = data?.let { java.io.File(it).parentFile?.name },
+                folder = data?.let { java.io.File(it).parent },
             )
         }
     }
@@ -1548,6 +1544,7 @@ fun scanAudioInTree(context: Context, treeUri: Uri): List<TrackItem> {
                     title = base.ifBlank { name },
                     artist = queryDisplayName(context, treeUri) ?: "文件夹",
                     durationMs = audioDuration(context, uri),
+                    folder = dir.docId.substringAfter(':'),
                     lyricUri = lrcUri,
                 )
             }
@@ -1564,7 +1561,7 @@ private fun ModeIcon(mode: PlayMode, size: androidx.compose.ui.unit.Dp) {
         PlayMode.SINGLE -> Icons.Filled.RepeatOne
         PlayMode.LIST_LOOP -> Icons.Filled.Repeat
         PlayMode.SHUFFLE -> Icons.Filled.Shuffle
-        PlayMode.SEQUENCE -> Icons.Filled.Sort
+        PlayMode.SEQUENCE -> Icons.AutoMirrored.Filled.PlaylistPlay
     }
     Icon(
         imageVector = icon,
@@ -1633,6 +1630,7 @@ private fun karaokeAnnotated(
 /* ---------------- 均衡器面板 ---------------- */
 
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 private fun EqPanel(manager: PlayerManager, modifier: Modifier = Modifier) {
     val eq = manager.equalizer
     if (eq == null) {
@@ -1665,12 +1663,14 @@ private fun EqPanel(manager: PlayerManager, modifier: Modifier = Modifier) {
         }
     }
 
-    Column(modifier) {
-        // 预设
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 2.dp),
+    Column(
+        modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+    ) {
+        // 预设（自动换行）
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             presets.forEach { name ->
@@ -1692,48 +1692,44 @@ private fun EqPanel(manager: PlayerManager, modifier: Modifier = Modifier) {
             }
         }
         Spacer(Modifier.height(10.dp))
-        // 2 行 x 5 列波段滑块（bands 不足 10 时动态）
-        val half = (bands + 1) / 2
-        repeat(2) { row ->
+        // 每行一个波段滑块：左频标 + 滑块 + 右 dB 标（不重叠，面板可滚动）
+        for (i in 0 until bands) {
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    .padding(vertical = 1.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                for (i in row * half until minOf((row + 1) * half, bands)) {
-                    val idx = i
-                    Column(
-                        Modifier.weight(1f),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Text(
-                            "${(eq.getCenterFreq(idx.toShort()) / 1000f).toInt()}k",
-                            fontSize = 9.sp,
-                            color = Color.White.copy(alpha = 0.5f),
-                        )
-                        Slider(
-                            value = levels[idx],
-                            onValueChange = {
-                                levels[idx] = it
-                                presetName = "原声"
-                                runCatching {
-                                    eq.setBandLevel(
-                                        idx.toShort(),
-                                        (levelRange.first + (it * (levelRange.second - levelRange.first))).toInt().toShort(),
-                                    )
-                                }
-                            },
-                            valueRange = 0f..1f,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Text(
-                            bandDbText(levels[idx]),
-                            fontSize = 9.sp,
-                            color = Color.White.copy(alpha = 0.5f),
-                        )
-                    }
-                }
+                Text(
+                    "${(eq.getCenterFreq(i.toShort()) / 1000f).toInt()}Hz",
+                    fontSize = 10.sp,
+                    color = Color.White.copy(alpha = 0.55f),
+                    modifier = Modifier.width(40.dp),
+                )
+                Slider(
+                    value = levels[i],
+                    onValueChange = {
+                        levels[i] = it
+                        presetName = "原声"
+                        runCatching {
+                            eq.setBandLevel(
+                                i.toShort(),
+                                (levelRange.first + (it * (levelRange.second - levelRange.first))).toInt().toShort(),
+                            )
+                        }
+                    },
+                    valueRange = 0f..1f,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(30.dp),
+                )
+                Text(
+                    bandDbText(levels[i]),
+                    fontSize = 10.sp,
+                    color = Color.White.copy(alpha = 0.55f),
+                    modifier = Modifier.width(46.dp),
+                    textAlign = TextAlign.End,
+                )
             }
         }
     }
