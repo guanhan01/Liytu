@@ -40,7 +40,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.ArrowDropUp
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -66,6 +65,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -80,6 +80,7 @@ import com.liytu.coreui.components.GlassCard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.nio.charset.Charset
 import java.util.zip.ZipInputStream
 import kotlin.math.abs
 
@@ -344,7 +345,8 @@ private fun PagedReader(title: String, text: String, progressKey: String, onBack
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val maxW = constraints.maxWidth
-        val maxH = (constraints.maxHeight - 40.dp.roundToPx() * 2).coerceAtLeast(100)
+        val padPx = (40 * LocalDensity.current.density).toInt()
+        val maxH = (constraints.maxHeight - padPx * 2).coerceAtLeast(100)
         LaunchedEffect(text, fontSize, lineHeightFactor, fontName, maxW, maxH) {
             // TextMeasurer 需主线程测量；大文本一次测量约 1 秒内
             pages = paginateText(text.take(320_000), measurer, style, maxW, maxH)
