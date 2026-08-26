@@ -1,7 +1,7 @@
 package com.liytu.feature.music
 
 import android.content.Context
-import android.media.MediaMetadataRetriever
+import android.net.Uri
 import android.provider.MediaStore
 import java.io.File
 import java.nio.charset.Charset
@@ -47,28 +47,13 @@ fun parseLrc(content: String): List<LrcLine> {
 
 /**
  * 歌词加载（优先级）：
- * 1. 音频内嵌歌词标签（ID3 USLT 等）—— 走 content:// URI 授权，分区存储下最可靠
- * 2. 同目录同名 .lrc 文件（MediaStore DATA 路径；仅 Android 12 及以下 / 文件权限放行时可用）
+ * 1. 音频内嵌 ID3 USLT 歌词标签 —— 通过 content:// 流读取（分区存储下唯一可靠方式）
+ * 2. 同目录同名 .lrc 文件（MediaStore DATA 路径；仅旧系统 / 文件权限放行时可用）
  */
 fun loadLrcFromTrack(context: Context, track: TrackItem): List<LrcLine> {
-    // 1. 内嵌歌词
-    val embedded = try {
-        val retriever = MediaMetadataRetriever()
-        try {
-            retriever.setDataSource(context, track.uri)
-            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_LYRIC)
-        } catch (_: Exception) {
-            null
-        } finally {
-            try { retriever.release() } catch (_: Exception) { }
-        }
-    } catch (_: Exception) {
-        null
-    }
-    val embeddedLrc = embedded?.takeIf { it.isNotBlank() }?.let { parseLrc(it) }
-    if (!embeddedLrc.isNullOrEmpty()) return embeddedLrc
+    val embedded = extractEmbeddedLrc(context, track.uri)?.takeIf { it.isNotBlank() }?.let { parseLrc(it) }
+    if (!embedded.isNullOrEmpty()) return embedded
 
-    // 2. 同目录 .lrc
     val path = queryAudioPath(context, track.id) ?: return emptyList()
     val file = File(path)
     val lrcFile = file.parentFile?.let { File(it, file.nameWithoutExtension + ".lrc") } ?: return emptyList()
@@ -78,6 +63,95 @@ fun loadLrcFromTrack(context: Context, track: TrackItem): List<LrcLine> {
     } catch (_: Exception) {
         emptyList()
     }
+}
+
+/** 从 content:// 流中提取 ID3v2 USLT 歌词文本 */
+fun extractEmbeddedLrc(context: Context, uri: Uri): String? {
+    return try {
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            val header = ByteArray(10)
+            if (input.read(header) < 10) return@use null
+            if (header[0] != 'I'.code.toByte() || header[1] != 'D'.code.toByte() || header[2] != '3'.code.toByte()) {
+                return@use null
+            }
+            val version = header[3].toInt() and 0xFF
+            val syncSafe = { b: ByteArray, off: Int ->
+                ((b[off].toInt() and 0x7f) shl 21) or
+                    ((b[off + 1].toInt() and 0x7f) shl 14) or
+                    ((b[off + 2].toInt() and 0x7f) shl 7) or
+                    (b[off + 3].toInt() and 0x7f)
+            }
+            val tagSize = syncSafe(header, 6).coerceAtMost(512 * 1024)
+            val body = ByteArray(tagSize)
+            var total = 0
+            while (total < tagSize) {
+                val n = input.read(body, total, tagSize - total)
+                if (n <= 0) break
+                total += n
+            }
+            parseId3Uslt(body.copyOf(total), version)
+        }
+    } catch (_: Exception) {
+        null
+    }
+}
+
+/** 遍历 ID3v2 帧，返回 USLT 帧文本 */
+private fun parseId3Uslt(data: ByteArray, version: Int): String? {
+    var i = 0
+    // 跳过扩展头（v2.3 4 字节大端长度；v2.4 syncsafe 长度）
+    val headerFlags = 0
+    if (headerFlags and 0x40 != 0) {
+        // 简化：本库标签由 mutagen 生成，无扩展头；这里做防御
+        if (data.size < 4) return null
+        val extSize = if (version >= 4) {
+            ((data[0].toInt() and 0x7f) shl 21) or ((data[1].toInt() and 0x7f) shl 14) or
+                ((data[2].toInt() and 0x7f) shl 7) or (data[3].toInt() and 0x7f)
+        } else {
+            ((data[0].toInt() and 0xff) shl 24) or ((data[1].toInt() and 0xff) shl 16) or
+                ((data[2].toInt() and 0xff) shl 8) or (data[3].toInt() and 0xff)
+        }
+        i = 4 + if (version >= 4) extSize else extSize
+    }
+    while (i + 10 <= data.size) {
+        val id = String(data, i, 4, Charsets.US_ASCII)
+        if (id == "\u0000\u0000\u0000\u0000") break
+        val rawSize =
+            ((data[i + 4].toInt() and 0xff) shl 24) or ((data[i + 5].toInt() and 0xff) shl 16) or
+                ((data[i + 6].toInt() and 0xff) shl 8) or (data[i + 7].toInt() and 0xff)
+        val size = if (version >= 4) {
+            // v2.4 syncsafe
+            ((data[i + 4].toInt() and 0x7f) shl 21) or ((data[i + 5].toInt() and 0x7f) shl 14) or
+                ((data[i + 6].toInt() and 0x7f) shl 7) or (data[i + 7].toInt() and 0x7f)
+        } else rawSize
+        if (id == "USLT") {
+            val bodyOff = i + 10
+            val bodySize = size.coerceAtMost(data.size - bodyOff)
+            if (bodySize < 4) return null
+            val enc = data[bodyOff].toInt() and 0xff
+            var p = bodyOff + 4
+            val frameEnd = bodyOff + bodySize
+            // 跳过描述符（encoding 决定终止字节）
+            if (enc == 0 || enc == 3) {
+                while (p < frameEnd && data[p] != 0.toByte()) p++
+                p++
+            } else {
+                while (p + 1 < frameEnd && !(data[p] == 0.toByte() && data[p + 1] == 0.toByte())) p += 2
+                p += 2
+            }
+            if (p >= frameEnd) return null
+            val textBytes = data.copyOfRange(p, frameEnd)
+            return when (enc) {
+                0 -> String(textBytes, Charsets.ISO_8859_1)
+                1 -> String(textBytes, Charsets.UTF_16)
+                2 -> String(textBytes, Charsets.UTF_16BE)
+                3 -> String(textBytes, Charsets.UTF_8)
+                else -> null
+            }
+        }
+        i += 10 + size
+    }
+    return null
 }
 
 /** 按 MediaStore _id 查询音频文件路径 */
