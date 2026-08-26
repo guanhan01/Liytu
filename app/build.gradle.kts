@@ -41,6 +41,7 @@ dependencies {
     implementation(project(":feature-video"))
     implementation(project(":feature-books"))
     implementation(project(":feature-comics"))
+    implementation(project(":feature-mine"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
@@ -50,6 +51,8 @@ dependencies {
     implementation(libs.lifecycle.runtime.compose)
     implementation(libs.coroutines.android)
     implementation(libs.material.icons.core)
+    implementation(libs.material.icons.extended)
+    implementation(libs.material3)
 
     // jb compose 坐标 -> 解析为 androidx.compose
     implementation("org.jetbrains.compose.foundation:foundation:1.11.1")
