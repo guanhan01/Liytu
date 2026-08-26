@@ -167,7 +167,6 @@ private fun FeatureCard(
     onClick: () -> Unit,
 ) {
     GlassCard(
-        backdrop = null,
         modifier = modifier.clickable(onClick = onClick),
         cornerRadius = 24.dp,
         tint = Color.White.copy(alpha = 0.14f),
