@@ -31,6 +31,7 @@ import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
@@ -44,6 +45,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -62,6 +64,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -423,13 +426,16 @@ private suspend fun scanVideos(context: Context): List<VideoItem> = withContext(
         val idCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
         val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.TITLE)
         val durationCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION)
+        val dataCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATA)
         while (cursor.moveToNext()) {
             val id = cursor.getLong(idCol)
+            val data = cursor.getString(dataCol)
             result += VideoItem(
                 id = id,
                 uri = ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id),
                 title = cursor.getString(titleCol)?.takeIf { it.isNotBlank() } ?: "本地视频 ${id}",
                 durationMs = cursor.getLong(durationCol),
+                folder = data?.let { java.io.File(it).parentFile?.name },
             )
         }
     }
