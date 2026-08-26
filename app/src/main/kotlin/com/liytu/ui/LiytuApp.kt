@@ -58,27 +58,39 @@ private val tabIcons = listOf<ImageVector>(
 )
 private val tabLabels = listOf("首页", "音乐", "影视", "书漫", "我的")
 
+/** 根据预设与液态玻璃开关 / 强度计算背景渐变色 */
+private fun backgroundColors(preset: LiytuThemePreset): List<Color> {
+    val intensity = preset.liquidGlassIntensity.coerceIn(0f, 1f)
+    return if (preset.liquidGlassEnabled) {
+        listOf(
+            preset.key,
+            preset.key.copy(alpha = 0.55f + 0.35f * intensity),
+            preset.accent.copy(alpha = 0.60f + 0.30f * intensity),
+            preset.accent,
+        )
+    } else {
+        // 关闭液态玻璃：更实的渐变（模拟纯色 + 高光）
+        listOf(
+            preset.key.copy(alpha = 0.94f),
+            preset.key.copy(alpha = 0.82f),
+            preset.accent.copy(alpha = 0.55f),
+            preset.accent.copy(alpha = 0.78f),
+        )
+    }
+}
+
 @Composable
 fun LiytuApp(preset: LiytuThemePreset, onPresetChange: (LiytuThemePreset) -> Unit) {
     var selected by rememberSaveable { mutableIntStateOf(0) }
     val backdrop = rememberLayerBackdrop()
 
     Box(Modifier.fillMaxSize()) {
-        // 液态玻璃背景层：渐变铺满（含状态栏区域）
+        // 液态玻璃背景层：渐变铺满（含状态栏区域），随液态玻璃开关 / 强度实时变化
         Box(
             Modifier
                 .fillMaxSize()
                 .layerBackdrop(backdrop)
-                .background(
-                    Brush.linearGradient(
-                        listOf(
-                            preset.key,
-                            preset.key.copy(alpha = 0.75f),
-                            preset.accent.copy(alpha = 0.85f),
-                            preset.accent,
-                        )
-                    )
-                )
+                .background(Brush.linearGradient(backgroundColors(preset)))
         )
         // 内容层：全局提供 backdrop，供所有 GlassCard 使用
         CompositionLocalProvider(LocalAppBackdrop provides backdrop) {
