@@ -33,8 +33,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Slider
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -52,6 +52,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -74,6 +75,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 data class VideoItem(
@@ -81,6 +83,7 @@ data class VideoItem(
     val uri: Uri,
     val title: String,
     val durationMs: Long,
+    val folder: String? = null,
 )
 
 @Composable
@@ -600,12 +603,23 @@ private fun VideoPlayerPage(
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = { if (player.isPlaying) player.pause() else player.play() }) {
-                        Icon(
-                            if (player.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                            contentDescription = "播放/暂停",
-                            tint = Color.White,
-                            modifier = Modifier.size(22.dp),
-                        )
+                        if (player.isPlaying) {
+                            Row(
+                                Modifier.size(24.dp),
+                                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Box(Modifier.width(5.dp).height(18.dp).clip(RoundedCornerShape(2.dp)).background(Color.White))
+                                Box(Modifier.width(5.dp).height(18.dp).clip(RoundedCornerShape(2.dp)).background(Color.White))
+                            }
+                        } else {
+                            Icon(
+                                Icons.Filled.PlayArrow,
+                                contentDescription = "播放",
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp),
+                            )
+                        }
                     }
                     Spacer(Modifier.width(6.dp))
                     val dur = player.duration.takeIf { it > 0 } ?: 0L
