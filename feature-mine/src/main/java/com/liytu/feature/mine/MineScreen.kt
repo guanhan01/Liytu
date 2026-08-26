@@ -83,7 +83,7 @@ private fun PresetRow(preset: LiytuThemePreset, selected: Boolean, onClick: () -
                 Modifier
                     .size(36.dp)
                     .background(
-                        color = androidx.compose.ui.graphics.Brush.linearGradient(
+                        brush = androidx.compose.ui.graphics.Brush.linearGradient(
                             listOf(preset.key, preset.accent)
                         ),
                         shape = CircleShape,
