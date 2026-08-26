@@ -24,7 +24,8 @@ android {
 
 dependencies {
     implementation(libs.androidx.core.ktx)
-    implementation(libs.backdrop)
+    // backdrop 在公开 API（GlassCard/Backdrop 参数）中使用，必须 api 暴露给下游模块
+    api(libs.backdrop)
     implementation(libs.shapes)
     implementation(libs.miuix)
     implementation(libs.material3)
